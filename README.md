@@ -100,3 +100,17 @@ Seed增加FD-202611-A可用30kg、FD-HOLD隔离8kg、FD-EXPIRED已过期5kg，�
 GET /moves /insulation-lots /insulation-installs /spring-reviews供三角色；POST /moves、complete/cancel、POST /insulation-lots、POST /insulation-installs、PUT ventilation、POST remove及POST /spring-reviews允许蜂师/主管；move approve、insulation accept、spring pass及物料隔离仅主管，viewer全部只读。各新增模型均有外键；物料数量与春检值域由数据库和Pydantic校验。
 
 Seed只在缺失时增加IN-2026-WINTER 120件，不改人工库存/安装/春检；历史winter_ready无需补装以维持历史状态，新的春检动作才要求保温。真实证据在test-artifacts/gb-1027/v3/。本地检疫留痕不替代行政检疫证；每箱每季一条春检，本演示固定2026越冬季，无跨季归档。
+
+## V4 保温批次召回与逐箱换装
+
+保温批次隔离只拦新领用，已装蜂箱仍能验收和春检。本版增加主管发起的**批次召回**，锁定当次仍在箱上的安装：隔离(quarantine)状态不变，但被召回蜂箱在换装重新验收前不能验收、转场或春检放行。
+
+- **召回**：`POST /insulation-recalls`（仅主管，`lot_id`+至少5字依据）。发起时把该批次所有 `installed/accepted` 安装写入 `InsulationRecallItem`，状态 `locked`；同批同时只允许一个未关闭召回。**旧安装可后续接入**：`POST /insulation-recalls/{id}/attach`（`install_id`），只接受同批、仍在箱上的安装，已在其他召回中的拒绝。
+- **锁定范围**：验收 `accept`、转场申请/签发/实际转场、春检登记/审签均按蜂箱检查未销项召回项(`locked/recovered`)，命中即 409。解除批次隔离（`PUT /insulation-lots/{id}/state`）不解封蜂箱。被召回批次也不可再用于任何换装。
+- **历史凭据**：召回发起/接入时，该安装关联的既有 `SpringReview` 写入 `SpringRecallMark`，已通过的春检记录保留原状态与审签人，同时在页面和 `GET /spring-recall-marks` 标明召回；不追溯篡改历史结论，但不再作为现行放行依据。
+- **逐箱换装**：`POST /insulation-installs/replace`（蜂师/主管）按蜂箱办理：先按实际可复用数一次拆回原安装（`state=removed`，重复拆返拒绝），旧批次可复用件写入 `insulation_quarantine_stock` **隔离库存**，不并入 `available_units`；再锁定合格批次扣件，生成新安装并回填 `replacement_install_id`，召回项转 `recovered`。新安装须通风核查并由主管验收，验收成功才把召回项转 `resolved`，蜂箱随即解封。
+- **中断重试**：换装分步提交；若拆回后、扣料前中断，重试沿用同一召回项，已拆回的原安装不重复返库、未扣料才扣；若新安装已登记则直接返回原安装，不重复扣料。若已生成的新安装又被拆除，召回项回到 `recovered`，可继续换装。
+- **并发口径**：所有召回/换装/验收/拆除/转场/春检写操作先取 PostgreSQL 事务级 advisory lock（`recall_service.lock_season`），再按行锁读取，实际生效顺序即串行决定影响范围与库存：先召回则后发生的验收被拒；先验收完成则在发起召回时按当时仍 `accepted` 纳入锁定。拆除与召回并发时，拆除先生效则计入隔离库存并在召回时不再锁定该安装，召回先生效则拆除归入隔离库存。
+- **追溯**：`GET /insulation-recalls/{id}` 返回批次、依据、每笔原安装/原批次/原验收人/拆回件数/换装安装/来源春检标记；`GET /insulation-installs/{id}/trace` 返回该安装是原始召回件、换装件或普通安装及其召回 ID，页面上可直接办理召回、换装、查来源。
+- 前端新增第 10 页 `pages/recalls.js`（主管召回、逐箱换装、隔离库存、召回项表格、来源追溯）；`pages/insulation.js` 标注召回锁定与换装来源，`pages/moves.js`、`pages/spring.js` 过滤并标注被锁蜂箱。新表 `insulation_recalls`、`insulation_recall_items`、`insulation_quarantine_stock`、`spring_recall_marks` 由 metadata 补建，无旧表列变更；seed 仅补 `IN-2026-REPL` 合格批次，不制造召回数据。
+- 范围：仅召回保温安装，不召回饲料/蜂王；隔离库存的处理（报废/返供应商）不在本版，只记数与追溯。

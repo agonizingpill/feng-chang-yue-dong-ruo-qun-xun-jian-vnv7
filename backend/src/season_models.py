@@ -1,5 +1,5 @@
 from datetime import date,datetime
-from sqlalchemy import String,Float,ForeignKey,JSON,CheckConstraint,Date,DateTime,func
+from sqlalchemy import String,Float,ForeignKey,JSON,CheckConstraint,Date,DateTime,UniqueConstraint,func
 from sqlalchemy.orm import Mapped,mapped_column
 from .database import Base
 class ApiaryMove(Base):
@@ -33,6 +33,41 @@ class InsulationInstall(Base):
     accepted_by:Mapped[str]=mapped_column(String(120),default='')
     returned_units:Mapped[int]=mapped_column(default=0)
     removed_by:Mapped[str]=mapped_column(String(120),default='')
+class InsulationRecall(Base):
+    __tablename__='insulation_recalls'
+    id:Mapped[int]=mapped_column(primary_key=True)
+    lot_id:Mapped[int]=mapped_column(ForeignKey('insulation_lots.id'))
+    reason:Mapped[str]=mapped_column(String(300))
+    state:Mapped[str]=mapped_column(String(24),default='open')
+    created_by:Mapped[str]=mapped_column(String(120))
+    created_at:Mapped[datetime]=mapped_column(DateTime,server_default=func.now())
+class InsulationRecallItem(Base):
+    __tablename__='insulation_recall_items'
+    __table_args__=(CheckConstraint('recovered_units>=0'),UniqueConstraint('recall_id','install_id'))
+    id:Mapped[int]=mapped_column(primary_key=True)
+    recall_id:Mapped[int]=mapped_column(ForeignKey('insulation_recalls.id'))
+    install_id:Mapped[int]=mapped_column(ForeignKey('insulation_installs.id'))
+    hive_id:Mapped[int]=mapped_column(ForeignKey('hives.id'))
+    install_state_at_recall:Mapped[str]=mapped_column(String(24))
+    state:Mapped[str]=mapped_column(String(24),default='locked')
+    replacement_install_id:Mapped[int|None]=mapped_column(ForeignKey('insulation_installs.id'),nullable=True)
+    recovered_units:Mapped[int]=mapped_column(default=0)
+    created_at:Mapped[datetime]=mapped_column(DateTime,server_default=func.now())
+    resolved_at:Mapped[datetime|None]=mapped_column(DateTime,nullable=True)
+class InsulationQuarantineStock(Base):
+    __tablename__='insulation_quarantine_stock'
+    __table_args__=(CheckConstraint('units>=0'),)
+    id:Mapped[int]=mapped_column(primary_key=True)
+    lot_id:Mapped[int]=mapped_column(ForeignKey('insulation_lots.id'),unique=True)
+    units:Mapped[int]=mapped_column(default=0)
+class SpringRecallMark(Base):
+    __tablename__='spring_recall_marks'
+    __table_args__=(UniqueConstraint('recall_id','review_id'),)
+    id:Mapped[int]=mapped_column(primary_key=True)
+    recall_id:Mapped[int]=mapped_column(ForeignKey('insulation_recalls.id'))
+    review_id:Mapped[int]=mapped_column(ForeignKey('spring_reviews.id'))
+    install_id:Mapped[int]=mapped_column(ForeignKey('insulation_installs.id'))
+    marked_at:Mapped[datetime]=mapped_column(DateTime,server_default=func.now())
 class SpringReview(Base):
     __tablename__='spring_reviews'
     __table_args__=(CheckConstraint('opening_weight>0 AND frames>=0 AND frames<=20 AND mortality_pct>=0 AND mortality_pct<=100'),)
